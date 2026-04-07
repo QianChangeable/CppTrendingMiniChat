@@ -33,7 +33,7 @@ struct ClientSession {
 
 static std::unordered_map<int, ClientSession> client_sessions;
 
-std::string to_ip_port_string(const sockaddr_in& client_addr) {
+std::string ToIpPortString(const sockaddr_in& client_addr) {
 	char ip_buffer[INET_ADDRSTRLEN] = {0};
 	::inet_ntop(AF_INET, &client_addr.sin_addr, ip_buffer, sizeof(ip_buffer));
 	unsigned short port = ntohs(client_addr.sin_port);
@@ -42,7 +42,7 @@ std::string to_ip_port_string(const sockaddr_in& client_addr) {
 
 // 把字符串安全解析成 JSON
 // 解析失败返回 false，不抛异常
-bool try_parse_json(const std::string& text, json& out_json) {
+bool TryParseJson(const std::string& text, json& out_json) {
 	try {
 		out_json = json::parse(text);
 		return true;
@@ -51,7 +51,7 @@ bool try_parse_json(const std::string& text, json& out_json) {
 	}
 }
 
-bool add_client(Epoll& epoll, int client_fd) {
+bool AddClient(Epoll& epoll, int client_fd) {
 	int fd_flags = ::fcntl(client_fd, F_GETFL, 0);
 	if (fd_flags < 0 || ::fcntl(client_fd, F_SETFL, fd_flags | O_NONBLOCK) != 0) {
 		SPDLOG_ERROR("set_non_blocking failed, fd={}", client_fd);
@@ -72,7 +72,7 @@ bool add_client(Epoll& epoll, int client_fd) {
 	return true;
 }
 
-void remove_client(Epoll& epoll, int client_fd) {
+void RemoveClient(Epoll& epoll, int client_fd) {
 	epoll.remove(client_fd);
 	::close(client_fd);
 	client_sessions.erase(client_fd);
@@ -80,7 +80,7 @@ void remove_client(Epoll& epoll, int client_fd) {
 	SPDLOG_INFO("client offline, fd={}", client_fd);
 }
 
-void enqueue_json_to_client(Epoll& epoll, int client_fd, const json& message_json) {
+void EnqueueJsonToClient(Epoll& epoll, int client_fd, const json& message_json) {
 	auto it = client_sessions.find(client_fd);
 	if (it == client_sessions.end()) {
 		return;
@@ -96,18 +96,18 @@ void enqueue_json_to_client(Epoll& epoll, int client_fd, const json& message_jso
 	epoll.modify(client_fd, EPOLLIN | EPOLLOUT);
 }
 
-void broadcast_json(Epoll& epoll, const json& message_json, int exclude_fd) {
+void BroadcastJson(Epoll& epoll, const json& message_json, int exclude_fd) {
 	for (auto& entry : client_sessions) {
 		int client_fd = entry.first;
 		if (client_fd == exclude_fd) {
 			continue;
 		}
-		enqueue_json_to_client(epoll, client_fd, message_json);
+		EnqueueJsonToClient(epoll, client_fd, message_json);
 	}
 }
 
 // 处理一条来自客户端的 JSON 消息
-void process_one_client_json(Epoll& epoll, ClientSession& sender, const json& inbound_json) {
+void ProcessOneClientJson(Epoll& epoll, ClientSession& sender, const json& inbound_json) {
 	// 简单协议：
 	// {
 	//   "type": "chat",
@@ -138,11 +138,11 @@ void process_one_client_json(Epoll& epoll, ClientSession& sender, const json& in
 	    {"text", text},
 	};
 
-	broadcast_json(epoll, outbound_json, sender.fd);
+	BroadcastJson(epoll, outbound_json, sender.fd);
 }
 
 // 从 recv_buffer 里按 '\n' 取出完整一行，再当 JSON 处理
-void process_recv_buffer(Epoll& epoll, ClientSession& client) {
+void ProcessRecvBuffer(Epoll& epoll, ClientSession& client) {
 	while (true) {
 		size_t newline_pos = client.recv_buffer.find('\n');
 		if (newline_pos == std::string::npos) {
@@ -157,16 +157,16 @@ void process_recv_buffer(Epoll& epoll, ClientSession& client) {
 		}
 
 		json inbound_json;
-		if (!try_parse_json(one_line, inbound_json)) {
+		if (!TryParseJson(one_line, inbound_json)) {
 			SPDLOG_WARN("invalid json from fd={}, raw={}", client.fd, one_line);
 			continue;
 		}
 
-		process_one_client_json(epoll, client, inbound_json);
+		ProcessOneClientJson(epoll, client, inbound_json);
 	}
 }
 
-void handle_client_readable(Epoll& epoll, int client_fd) {
+void HandleClientReadable(Epoll& epoll, int client_fd) {
 	auto it = client_sessions.find(client_fd);
 	if (it == client_sessions.end()) {
 		return;
@@ -180,12 +180,12 @@ void handle_client_readable(Epoll& epoll, int client_fd) {
 
 		if (n > 0) {
 			client.recv_buffer.append(read_buffer, static_cast<size_t>(n));
-			process_recv_buffer(epoll, client);
+			ProcessRecvBuffer(epoll, client);
 			continue;
 		}
 
 		if (n == 0) {
-			remove_client(epoll, client_fd);
+			RemoveClient(epoll, client_fd);
 			return;
 		}
 
@@ -194,12 +194,12 @@ void handle_client_readable(Epoll& epoll, int client_fd) {
 		}
 
 		SPDLOG_ERROR("recv failed, fd={}, errno={}", client_fd, errno);
-		remove_client(epoll, client_fd);
+		RemoveClient(epoll, client_fd);
 		return;
 	}
 }
 
-void handle_client_writable(Epoll& epoll, int client_fd) {
+void HandleClientWritable(Epoll& epoll, int client_fd) {
 	auto it = client_sessions.find(client_fd);
 	if (it == client_sessions.end()) {
 		return;
@@ -226,7 +226,7 @@ void handle_client_writable(Epoll& epoll, int client_fd) {
 		}
 
 		SPDLOG_ERROR("send failed, fd={}, errno={}", client_fd, errno);
-		remove_client(epoll, client_fd);
+		RemoveClient(epoll, client_fd);
 		return;
 	}
 
@@ -287,7 +287,7 @@ int main() {
 
 			if (event_mask & (EPOLLERR | EPOLLHUP)) {
 				if (event_fd != listen_socket.fd()) {
-					remove_client(epoll, event_fd);
+					RemoveClient(epoll, event_fd);
 				}
 				continue;
 			}
@@ -298,10 +298,10 @@ int main() {
 					int client_fd = listen_socket.accept(&client_addr);
 
 					if (client_fd >= 0) {
-						SPDLOG_INFO("accept client fd={}, addr={}", client_fd, to_ip_port_string(client_addr));
+						SPDLOG_INFO("accept client fd={}, addr={}", client_fd, ToIpPortString(client_addr));
 
-						if (!add_client(epoll, client_fd)) {
-							SPDLOG_ERROR("add_client failed, errno={}, msg={}", errno, strerror(errno));
+						if (!AddClient(epoll, client_fd)) {
+							SPDLOG_ERROR("AddClient failed, errno={}, msg={}", errno, strerror(errno));
 							::close(client_fd);
 						}
 						continue;
@@ -318,11 +318,11 @@ int main() {
 			}
 
 			if (event_mask & EPOLLIN) {
-				handle_client_readable(epoll, event_fd);
+				HandleClientReadable(epoll, event_fd);
 			}
 
 			if ((event_mask & EPOLLOUT) && client_sessions.find(event_fd) != client_sessions.end()) {
-				handle_client_writable(epoll, event_fd);
+				HandleClientWritable(epoll, event_fd);
 			}
 		}
 	}

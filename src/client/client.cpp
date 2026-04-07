@@ -22,18 +22,18 @@ static const char* k_server_ip = "127.0.0.1";
 static const unsigned short k_server_port = 8888;
 static const size_t k_read_buffer_size = 4096;
 
-bool is_interactive_terminal() {
+bool IsInteractiveTerminal() {
 	return ::isatty(STDIN_FILENO) == 1;
 }
 
-void print_input_prompt() {
-	if (is_interactive_terminal()) {
+void PrintInputPrompt() {
+	if (IsInteractiveTerminal()) {
 		std::cout << "> ";
 		std::cout.flush();
 	}
 }
 
-void disconnect_client(Socket& socket_client, const std::string& reason) {
+void DisconnectClient(Socket& socket_client, const std::string& reason) {
 	SPDLOG_INFO("{}", reason);
 	if (socket_client.valid()) {
 		::shutdown(socket_client.fd(), SHUT_RDWR);
@@ -43,7 +43,7 @@ void disconnect_client(Socket& socket_client, const std::string& reason) {
 }
 
 // 安全解析 JSON，不抛异常
-bool try_parse_json(const std::string& text, json& out_json) {
+bool TryParseJson(const std::string& text, json& out_json) {
 	try {
 		out_json = json::parse(text);
 		return true;
@@ -53,15 +53,15 @@ bool try_parse_json(const std::string& text, json& out_json) {
 }
 
 // 从键盘读取一行，封装为 JSON 发给服务器
-bool handle_stdin_and_send(Socket& socket_client) {
+bool HandleStdinAndSend(Socket& socket_client) {
 	std::string input_line;
 	if (!std::getline(std::cin, input_line)) {
-		disconnect_client(socket_client, "stdin closed, active disconnect");
+		DisconnectClient(socket_client, "stdin closed, active disconnect");
 		return false;
 	}
 
 	if (input_line == "quit") {
-		disconnect_client(socket_client, "quit command received, active disconnect");
+		DisconnectClient(socket_client, "quit command received, active disconnect");
 		return false;
 	}
 
@@ -90,7 +90,7 @@ bool handle_stdin_and_send(Socket& socket_client) {
 		}
 
 		SPDLOG_ERROR("send failed, errno={}", errno);
-		disconnect_client(socket_client, "send failed, active disconnect");
+		DisconnectClient(socket_client, "send failed, active disconnect");
 		return false;
 	}
 
@@ -98,7 +98,7 @@ bool handle_stdin_and_send(Socket& socket_client) {
 }
 
 // 从接收缓存中按 '\n' 切行，再逐行 JSON 解析和展示
-bool process_server_lines(std::string& recv_buffer) {
+bool ProcessServerLines(std::string& recv_buffer) {
 	bool printed_chat = false;
 
 	while (true) {
@@ -115,7 +115,7 @@ bool process_server_lines(std::string& recv_buffer) {
 		}
 
 		json inbound_json;
-		if (!try_parse_json(one_line, inbound_json)) {
+		if (!TryParseJson(one_line, inbound_json)) {
 			SPDLOG_WARN("invalid json from server: {}", one_line);
 			continue;
 		}
@@ -136,7 +136,7 @@ bool process_server_lines(std::string& recv_buffer) {
 }
 
 // 接收服务器数据
-bool handle_socket_and_print(Socket& socket_client, std::string& recv_buffer) {
+bool HandleSocketAndPrint(Socket& socket_client, std::string& recv_buffer) {
 	char read_buffer[k_read_buffer_size];
 
 	while (true) {
@@ -144,8 +144,8 @@ bool handle_socket_and_print(Socket& socket_client, std::string& recv_buffer) {
 
 		if (n > 0) {
 			recv_buffer.append(read_buffer, static_cast<size_t>(n));
-			if (process_server_lines(recv_buffer)) {
-				print_input_prompt();
+			if (ProcessServerLines(recv_buffer)) {
+				PrintInputPrompt();
 			}
 			continue;
 		}
@@ -188,7 +188,7 @@ int main() {
 
 	SPDLOG_INFO("connected to {}:{}", k_server_ip, k_server_port);
 	SPDLOG_INFO("type message and Enter to send, type 'quit' to exit");
-	print_input_prompt();
+	PrintInputPrompt();
 
 	Epoll epoll;
 	if (!epoll.create()) {
@@ -228,15 +228,15 @@ int main() {
 			}
 
 			if ((event_mask & EPOLLIN) && event_fd == STDIN_FILENO) {
-				if (!handle_stdin_and_send(socket_client)) {
+				if (!HandleStdinAndSend(socket_client)) {
 					return 0;
 				}
-				print_input_prompt();
+				PrintInputPrompt();
 				continue;
 			}
 
 			if ((event_mask & EPOLLIN) && event_fd == socket_client.fd()) {
-				if (!handle_socket_and_print(socket_client, recv_buffer)) {
+				if (!HandleSocketAndPrint(socket_client, recv_buffer)) {
 					return 0;
 				}
 				continue;
